@@ -1,67 +1,90 @@
-import Link from "next/link";
-
-import { LatestPost } from "~/app/_components/post";
 import { getServerAuthSession } from "~/server/auth";
-import { api, HydrateClient } from "~/trpc/server";
+import { redirect } from "next/navigation";
+import { AuthButtons } from "~/app/_components/AuthButtons";
+import { MusicPlayer } from "~/app/_components/MusicPlayer";
+import { Playlists } from "~/app/_components/Playlists";
+import Image from "next/image";
+import AIChat from './_components/AIChat';
 
 export default async function Home() {
-  const hello = await api.post.hello({ text: "from tRPC" });
   const session = await getServerAuthSession();
-
-  void api.post.getLatest.prefetch();
-
-  return (
-    <HydrateClient>
-      <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
-        <div className="container flex flex-col items-center justify-center gap-12 px-4 py-16">
-          <h1 className="text-5xl font-extrabold tracking-tight sm:text-[5rem]">
-            Create <span className="text-[hsl(280,100%,70%)]">T3</span> App
-          </h1>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-8">
-            <Link
-              className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4 hover:bg-white/20"
-              href="https://create.t3.gg/en/usage/first-steps"
-              target="_blank"
-            >
-              <h3 className="text-2xl font-bold">First Steps →</h3>
-              <div className="text-lg">
-                Just the basics - Everything you need to know to set up your
-                database and authentication.
+  
+  if (session) {
+    return (
+      <>
+        <div className="flex min-h-screen flex-col bg-[#1DB954]">
+          {/* Top Bar */}
+          <div className="flex items-center justify-between p-6">
+            <h1 className="text-2xl font-bold text-white">Spotifai</h1>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3">
+                {session.user?.image && (
+                  <div className="h-10 w-10 overflow-hidden rounded-full ring-2 ring-white/20">
+                    <Image
+                      src={session.user.image}
+                      alt={session.user.name ?? "Profile"}
+                      width={40}
+                      height={40}
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
+                )}
+                <span className="text-sm font-medium text-white">
+                  {session.user?.name}
+                </span>
               </div>
-            </Link>
-            <Link
-              className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4 hover:bg-white/20"
-              href="https://create.t3.gg/en/introduction"
-              target="_blank"
-            >
-              <h3 className="text-2xl font-bold">Documentation →</h3>
-              <div className="text-lg">
-                Learn more about Create T3 App, the libraries it uses, and how
-                to deploy it.
-              </div>
-            </Link>
-          </div>
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-2xl text-white">
-              {hello ? hello.greeting : "Loading tRPC query..."}
-            </p>
-
-            <div className="flex flex-col items-center justify-center gap-4">
-              <p className="text-center text-2xl text-white">
-                {session && <span>Logged in as {session.user?.name}</span>}
-              </p>
-              <Link
-                href={session ? "/api/auth/signout" : "/api/auth/signin"}
-                className="rounded-full bg-white/10 px-10 py-3 font-semibold no-underline transition hover:bg-white/20"
+              <a
+                href="/api/auth/signout"
+                className="rounded-full bg-black/20 px-4 py-2 text-sm font-medium text-white hover:bg-black/40"
               >
-                {session ? "Sign out" : "Sign in"}
-              </Link>
+                Sign out
+              </a>
             </div>
           </div>
 
-          {session?.user && <LatestPost />}
+          {/* Main Content with Sidebar */}
+          <div className="flex flex-1">
+            {/* Playlist Sidebar */}
+            <div className="w-80 flex-shrink-0">
+              <Playlists />
+            </div>
+
+            {/* Main Content Area */}
+            <div className="flex-1 p-6">
+              <div className="mb-6">
+                <h2 className="text-xl font-semibold text-white mb-4">AI Assistant</h2>
+                <AIChat />
+              </div>
+            </div>
+          </div>
         </div>
-      </main>
-    </HydrateClient>
+        <MusicPlayer />
+      </>
+    );
+  }
+
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-black px-4">
+      {/* Auth Container */}
+      <div className="w-full max-w-[450px] rounded-lg bg-[#121212] p-8">
+        <h2 className="mb-8 text-center text-4xl font-bold text-white">
+          Spotifai
+        </h2>
+
+        <AuthButtons />
+
+        {/* Terms */}
+        <p className="mt-8 text-center text-xs text-gray-400">
+          By continuing, you agree to Spotifai&apos;s{" "}
+          <a href="#" className="text-white hover:underline">
+            Terms & Conditions
+          </a>{" "}
+          and{" "}
+          <a href="#" className="text-white hover:underline">
+            Privacy Policy
+          </a>
+        </p>
+      </div>
+    </div>
   );
 }
