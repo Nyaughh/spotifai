@@ -6,6 +6,7 @@ import {
 } from "next-auth";
 import { type Adapter } from "next-auth/adapters";
 import SpotifyProvider from "next-auth/providers/spotify";
+import { refreshSpotifyToken } from "~/utils/spotify";
 
 import { env } from "~/env";
 import { db } from "~/server/db";
@@ -39,6 +40,8 @@ declare module "next-auth" {
       // role: UserRole;
     } & DefaultSession["user"];
     accessToken?: string;
+    refreshToken?: string;
+    expiresAt?: number;
     error?: string;
   }
 
@@ -76,12 +79,34 @@ export const authOptions: NextAuthOptions = {
           expiresAt: account.expires_at ? account.expires_at * 1000 : undefined,
         };
       }
-      return token;
+
+      // Return previous token if the access token has not expired yet
+      if (token.expiresAt && Date.now() < token.expiresAt) {
+        return token;
+      }
+
+      // Access token has expired, try to refresh it
+      try {
+        const { accessToken, expiresAt } = await refreshSpotifyToken(token.refreshToken!);
+        return {
+          ...token,
+          accessToken,
+          expiresAt,
+        };
+      } catch (error) {
+        console.error('Error refreshing access token:', error);
+        return {
+          ...token,
+          error: 'RefreshAccessTokenError',
+        };
+      }
     },
     session: ({ session, token }) => {
       return {
         ...session,
         accessToken: token.accessToken,
+        refreshToken: token.refreshToken,
+        expiresAt: token.expiresAt,
         error: token.error,
         user: {
           ...session.user,

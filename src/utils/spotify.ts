@@ -1,4 +1,5 @@
 import { type Session } from "next-auth";
+import { env } from "~/env";
 
 const SPOTIFY_API_BASE = 'https://api.spotify.com/v1';
 
@@ -91,4 +92,30 @@ export const getTopTracks = async (session: Session | null) => {
 // Get user's saved tracks
 export const getSavedTracks = async (session: Session | null) => {
   return spotifyFetch('/me/tracks', session);
-}; 
+};
+
+export async function refreshSpotifyToken(refreshToken: string) {
+  const basic = Buffer.from(`${env.SPOTIFY_CLIENT_ID}:${env.SPOTIFY_CLIENT_SECRET}`).toString('base64');
+  
+  const response = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${basic}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to refresh token');
+  }
+
+  const data = await response.json();
+  return {
+    accessToken: data.access_token,
+    expiresAt: Date.now() + data.expires_in * 1000,
+  };
+} 

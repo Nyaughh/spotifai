@@ -10,9 +10,10 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
-
 import { getServerAuthSession } from "~/server/auth";
 import { db } from "~/server/db";
+import { env } from "~/env";
+import { refreshSpotifyToken } from "~/utils/spotify";
 
 /**
  * 1. CONTEXT
@@ -28,6 +29,32 @@ import { db } from "~/server/db";
  */
 export const createTRPCContext = async (opts: { headers: Headers }) => {
   const session = await getServerAuthSession();
+
+  // Check if token needs refresh
+  if (session?.user && session.refreshToken && session.expiresAt) {
+    const expiresAt = session.expiresAt;
+    // Refresh if token expires in less than 5 minutes
+    if (expiresAt < Date.now() + 5 * 60 * 1000) {
+      try {
+        const { accessToken, expiresAt } = await refreshSpotifyToken(session.refreshToken);
+        session.accessToken = accessToken;
+        session.expiresAt = expiresAt;
+        
+        // Update the session in the database
+        await db.session.update({
+          where: { 
+            sessionToken: (session as any).sessionToken // Use sessionToken instead of userId
+          },
+          data: {
+            accessToken,
+            expiresAt: new Date(expiresAt),
+          },
+        });
+      } catch (error) {
+        console.error('Failed to refresh token:', error);
+      }
+    }
+  }
 
   return {
     db,

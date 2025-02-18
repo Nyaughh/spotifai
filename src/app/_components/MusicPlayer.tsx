@@ -3,6 +3,10 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import Image from 'next/image';
+import { api } from "~/trpc/react";
+import { ErrorToast } from "~/components/ui/error-toast";
+import { usePlaylistStore } from "~/store/playlistStore";
+import { cn } from "~/lib/utils";
 
 interface Track {
   id: string;
@@ -29,22 +33,30 @@ interface PlayerState {
   progress_ms: number;
   duration_ms: number;
   volume_percent: number;
+  shuffle_state: boolean;
+  repeat_state: 'off' | 'track' | 'context';
 }
+
+const PLAYER_HEIGHT = 88; // px - height of the player
 
 export function MusicPlayer() {
   const { data: session, status } = useSession();
-  const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
+  const { currentTrack, isPlaying, setCurrentTrack, setIsPlaying } = usePlaylistStore();
   const [playerState, setPlayerState] = useState<PlayerState>({
     is_playing: false,
     progress_ms: 0,
     duration_ms: 0,
     volume_percent: 50,
+    shuffle_state: false,
+    repeat_state: 'off',
   });
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Track[]>([]);
   const [showSearch, setShowSearch] = useState(false);
   const progressInterval = useRef<NodeJS.Timeout>();
+  const [error, setError] = useState<string | null>(null);
+  const utils = api.useUtils();
 
   const formatTime = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
@@ -74,91 +86,81 @@ export function MusicPlayer() {
     };
   }, [updateProgress]);
 
-  const fetchPlayerState = useCallback(async () => {
-    if (status !== 'authenticated') return;
-
-    try {
-      const response = await fetch('/api/spotify/player-state');
-      if (response.ok) {
-        const data = await response.json();
-        setPlayerState(prev => ({
-          ...prev,
-          is_playing: data.is_playing,
-          progress_ms: data.progress_ms || 0,
-          duration_ms: data.duration_ms || 0,
-          volume_percent: data.volume_percent || prev.volume_percent,
-        }));
-      }
-    } catch (error) {
-      console.error('Error fetching player state:', error);
+  const { data: playerStateData } = api.spotify.getPlayerState.useQuery(
+    undefined,
+    {
+      refetchInterval: 1000,
     }
-  }, [status]);
+  );
 
   useEffect(() => {
-    if (status !== 'authenticated') return;
-
-    const fetchCurrentTrack = async () => {
-      try {
-        const response = await fetch('/api/spotify/current-track');
-        if (response.ok) {
-          const data = await response.json();
-          setCurrentTrack(data);
-          setPlayerState(prev => ({
-            ...prev,
-            is_playing: data.is_playing ?? false,
-            duration_ms: data.duration_ms ?? 0,
-          }));
-        } else if (response.status === 404) {
-          setCurrentTrack(null);
-          setPlayerState(prev => ({ ...prev, is_playing: false }));
-        }
-      } catch (error) {
-        console.error('Error fetching current track:', error);
-        setCurrentTrack(null);
-        setPlayerState(prev => ({ ...prev, is_playing: false }));
-      }
-    };
-
-    // Initial fetch
-    fetchCurrentTrack();
-    fetchPlayerState();
-
-    // Reduce polling frequency to reduce API load
-    const trackInterval = setInterval(fetchCurrentTrack, 10000);
-    const stateInterval = setInterval(fetchPlayerState, 10000);
-
-    return () => {
-      clearInterval(trackInterval);
-      clearInterval(stateInterval);
-    };
-  }, [status, fetchPlayerState]);
-
-  const handlePlayPause = async () => {
-    if (status !== 'authenticated' || isLoading) return;
-
-    try {
-      setIsLoading(true);
-      const endpoint = playerState.is_playing ? '/api/spotify/pause' : '/api/spotify/play';
-      const response = await fetch(endpoint, { method: 'POST' });
+    if (playerStateData) {
+      setPlayerState({
+        is_playing: playerStateData.is_playing,
+        progress_ms: playerStateData.progress_ms,
+        duration_ms: playerStateData.item?.duration_ms ?? 0,
+        volume_percent: playerStateData.device?.volume_percent ?? 50,
+        shuffle_state: playerStateData.shuffle_state,
+        repeat_state: playerStateData.repeat_state,
+      });
       
-      // Optimistically update UI
-      setPlayerState(prev => ({ ...prev, is_playing: !prev.is_playing }));
-      
-      // If the request failed, revert the optimistic update
-      if (!response.ok) {
-        setPlayerState(prev => ({ ...prev, is_playing: !prev.is_playing }));
-        console.error('Error controlling playback:', await response.text());
+      if (playerStateData.item && (!currentTrack || playerStateData.item.uri !== currentTrack.uri)) {
+        setCurrentTrack(playerStateData.item);
+        setIsPlaying(playerStateData.is_playing);
       }
-    } catch (error) {
-      // Revert optimistic update on error
-      setPlayerState(prev => ({ ...prev, is_playing: !prev.is_playing }));
-      console.error('Error controlling playback:', error);
-    } finally {
-      setIsLoading(false);
+    }
+  }, [playerStateData, currentTrack]);
+
+  const { data: currentTrackData, error: currentTrackError } = api.spotify.getCurrentTrack.useQuery(
+    undefined,
+    {
+      refetchInterval: 10000,
+    }
+  );
+
+  const playMutation = api.spotify.play.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+
+  const pauseMutation = api.spotify.pause.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+
+  const nextMutation = api.spotify.next.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+
+  const previousMutation = api.spotify.previous.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+
+  const seekMutation = api.spotify.seek.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+
+  const volumeMutation = api.spotify.setVolume.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+
+  const shuffleMutation = api.spotify.shuffle.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+
+  const repeatMutation = api.spotify.repeat.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+
+  const handlePlayPause = () => {
+    if (isPlaying) {
+      pauseMutation.mutate();
+      setIsPlaying(false);
+    } else if (currentTrack) {
+      playMutation.mutate({ uri: currentTrack.uri });
+      setIsPlaying(true);
     }
   };
 
-  const handleSeek = async (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!playerState.duration_ms || isLoading) return;
 
     const bar = e.currentTarget;
@@ -166,45 +168,21 @@ export function MusicPlayer() {
     const position = (e.clientX - rect.left) / rect.width;
     const seekMs = Math.floor(position * playerState.duration_ms);
 
-    try {
-      setIsLoading(true);
-      const response = await fetch('/api/spotify/seek', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ position_ms: seekMs }),
-      });
-      if (response.ok) {
-        setPlayerState(prev => ({ ...prev, progress_ms: seekMs }));
-      }
-    } catch (error) {
-      console.error('Error seeking:', error);
-    } finally {
-      setIsLoading(false);
-    }
+    seekMutation.mutate({ position_ms: seekMs });
+    // Update local state immediately for smoother UX
+    setPlayerState(prev => ({ ...prev, progress_ms: seekMs }));
   };
 
-  const handleVolumeChange = async (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleVolumeChange = (e: React.MouseEvent<HTMLDivElement>) => {
     if (isLoading) return;
 
     const bar = e.currentTarget;
     const rect = bar.getBoundingClientRect();
     const volume = Math.round(((e.clientX - rect.left) / rect.width) * 100);
 
-    try {
-      setIsLoading(true);
-      const response = await fetch('/api/spotify/volume', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ volume_percent: volume }),
-      });
-      if (response.ok) {
-        setPlayerState(prev => ({ ...prev, volume_percent: volume }));
-      }
-    } catch (error) {
-      console.error('Error setting volume:', error);
-    } finally {
-      setIsLoading(false);
-    }
+    volumeMutation.mutate({ volume_percent: volume });
+    // Update local state immediately for smoother UX
+    setPlayerState(prev => ({ ...prev, volume_percent: volume }));
   };
 
   const handleSkip = async (direction: 'next' | 'previous') => {
@@ -239,7 +217,11 @@ export function MusicPlayer() {
 
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/spotify/search?q=${encodeURIComponent(searchQuery)}`);
+      const response = await fetch(`/api/spotify/search?q=${encodeURIComponent(searchQuery)}`, {
+        headers: {
+          'x-spotify-token': session?.accessToken || ''
+        } as HeadersInit
+      });
       if (response.ok) {
         const data: SearchResults = await response.json();
         setSearchResults(data.tracks?.items ?? []);
@@ -284,158 +266,146 @@ export function MusicPlayer() {
     }
   };
 
+  const { data: searchData } = api.spotify.searchTracks.useQuery(
+    { query: searchQuery },
+    { enabled: searchQuery.length > 0 }
+  );
+
+  useEffect(() => {
+    if (searchData) {
+      setSearchResults(searchData.tracks?.items ?? []);
+    }
+  }, [searchData]);
+
+  const handleTrackSelect = (track: Track) => {
+    playMutation.mutate({ uri: track.uri });
+    setShowSearch(false);
+    setSearchQuery('');
+  };
+
   if (status !== 'authenticated') return null;
 
   return (
     <>
-      {/* Search Panel */}
-      {showSearch && (
-        <div className="fixed inset-0 z-50 bg-black/95 p-4">
-          <div className="mx-auto max-w-3xl space-y-4">
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyUp={(e) => e.key === 'Enter' && handleSearch()}
-                placeholder="Search for songs..."
-                className="flex-1 rounded-full bg-white/10 px-4 py-2 text-white placeholder-white/50 outline-none focus:ring-2 focus:ring-green-500"
-                disabled={isLoading}
-              />
-              <button
-                onClick={() => setShowSearch(false)}
-                className="rounded-full bg-white/10 p-2 text-white"
-                disabled={isLoading}
-              >
-                <CloseIcon className="h-6 w-6" />
-              </button>
-            </div>
-            <div className="space-y-2">
-              {searchResults.map((track) => (
-                <div
-                  key={track.id}
-                  onClick={() => track.uri && playTrack(track.uri)}
-                  className={`flex cursor-pointer items-center gap-3 rounded-lg bg-white/5 p-2 ${
-                    isLoading ? 'opacity-50' : ''
-                  }`}
-                >
-                  {track.album?.images?.[0]?.url && (
-                    <Image
-                      src={track.album.images[0].url}
-                      alt={track.album.name ?? ''}
-                      width={48}
-                      height={48}
-                      className="rounded-md"
-                    />
-                  )}
-                  <div>
-                    <div className="font-medium text-white">{track.name}</div>
-                    <div className="text-sm text-white/60">
-                      {track.artists?.map(a => a.name).join(', ')}
-                    </div>
+      <div 
+        className="fixed bottom-0 left-0 right-0 z-50 border-t border-zinc-800 bg-zinc-900/95 backdrop-blur-lg"
+        style={{ height: `${PLAYER_HEIGHT}px` }}
+      >
+        <div className="flex h-full items-center px-8">
+          {/* Now Playing - Left Section */}
+          <div className="flex w-1/3 items-center justify-start gap-4">
+            {currentTrack ? (
+              <>
+                {currentTrack.album?.images[0] && (
+                  <img
+                    src={currentTrack.album.images[0].url}
+                    alt={currentTrack.name}
+                    className="h-14 w-14 rounded-md"
+                  />
+                )}
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-white">
+                    {currentTrack.name}
+                  </div>
+                  <div className="truncate text-sm text-zinc-400">
+                    {currentTrack.artists.map(a => a.name).join(', ')}
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Player Bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-black/95 backdrop-blur-lg">
-        <div className="mx-auto flex max-w-7xl items-center justify-between p-4">
-          {/* Track Info */}
-          <div className="flex min-w-[180px] items-center gap-4">
-            {currentTrack?.album?.images?.[0]?.url ? (
-              <div className="group relative h-14 w-14 overflow-hidden rounded-md">
-                <Image
-                  src={currentTrack.album.images[0].url}
-                  alt={currentTrack.album?.name ?? 'Album Cover'}
-                  width={56}
-                  height={56}
-                  className="h-full w-full object-cover"
-                />
-                <div className="absolute inset-0 hidden items-center justify-center bg-black/40 group-hover:flex">
-                  <ExpandIcon className="h-6 w-6 text-white" />
-                </div>
-              </div>
+              </>
             ) : (
-              <div className="flex h-14 w-14 items-center justify-center rounded-md bg-white/10">
-                <MusicIcon className="h-6 w-6 text-white/60" />
+              <div className="text-sm text-zinc-400">
+                Not Playing
               </div>
             )}
-            <div className="min-w-0 flex-1">
-              <h3 className="truncate text-sm font-medium text-white">
-                {currentTrack?.name ?? 'Not Playing'}
-              </h3>
-              <p className="truncate text-xs text-white/60">
-                {currentTrack?.artists?.map(a => a.name).join(', ')}
-              </p>
-            </div>
           </div>
 
-          {/* Playback Controls */}
-          <div className="flex flex-col items-center gap-2">
+          {/* Playback Controls - Center Section */}
+          <div className="flex w-1/3 flex-col items-center gap-2">
             <div className="flex items-center gap-4">
               <button
-                onClick={() => handleSkip('previous')}
-                className={`rounded-full p-2 text-white/80 ${
-                  isLoading ? 'opacity-50' : ''
-                }`}
+                onClick={() => shuffleMutation.mutate({ state: !playerState.shuffle_state })}
+                className={cn(
+                  "rounded-full p-2 transition-colors",
+                  playerState.shuffle_state 
+                    ? "text-green-500 hover:text-green-400" 
+                    : "text-zinc-400 hover:text-white"
+                )}
+                disabled={isLoading}
+              >
+                <ShuffleIcon className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => previousMutation.mutate()}
+                className="rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white"
                 disabled={isLoading}
               >
                 <PreviousIcon className="h-5 w-5" />
               </button>
-              
               <button
                 onClick={handlePlayPause}
-                className={`rounded-full bg-white p-3 text-black ${
-                  isLoading ? 'opacity-50' : ''
-                }`}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-black hover:scale-105"
                 disabled={isLoading}
               >
-                {playerState.is_playing ? (
-                  <PauseIcon className="h-6 w-6" />
+                {isPlaying ? (
+                  <PauseIcon className="h-5 w-5" />
                 ) : (
-                  <PlayIcon className="h-6 w-6" />
+                  <PlayIcon className="h-5 w-5" />
                 )}
               </button>
-
               <button
-                onClick={() => handleSkip('next')}
-                className={`rounded-full p-2 text-white/80 ${
-                  isLoading ? 'opacity-50' : ''
-                }`}
+                onClick={() => nextMutation.mutate()}
+                className="rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white"
                 disabled={isLoading}
               >
                 <NextIcon className="h-5 w-5" />
               </button>
+              <button
+                onClick={() => repeatMutation.mutate({ 
+                  state: playerState.repeat_state === 'off' ? 'context' : 
+                         playerState.repeat_state === 'context' ? 'track' : 'off' 
+                })}
+                className={cn(
+                  "rounded-full p-2 transition-colors",
+                  playerState.repeat_state !== 'off'
+                    ? "text-green-500 hover:text-green-400" 
+                    : "text-zinc-400 hover:text-white"
+                )}
+                disabled={isLoading}
+              >
+                <RepeatIcon className="h-5 w-5" />
+              </button>
             </div>
 
-            {/* Time Progress */}
-            <div className="flex items-center gap-2 text-xs text-white/60">
-              <span>{formatTime(playerState.progress_ms)}</span>
-              <span>/</span>
-              <span>{formatTime(playerState.duration_ms)}</span>
+            {/* Progress Bar */}
+            <div className="flex w-full items-center gap-2 px-4 text-xs text-zinc-400">
+              <span className="w-10 text-right">{formatTime(playerState.progress_ms)}</span>
+              <div
+                className="relative h-1 flex-1 cursor-pointer rounded-full bg-zinc-800"
+                onClick={handleSeek}
+              >
+                <div
+                  className="absolute h-full rounded-full bg-white group-hover:bg-green-500"
+                  style={{
+                    width: `${(playerState.progress_ms / playerState.duration_ms) * 100}%`,
+                  }}
+                />
+              </div>
+              <span className="w-10">{formatTime(playerState.duration_ms)}</span>
             </div>
           </div>
 
-          {/* Volume & Additional Controls */}
-          <div className="flex min-w-[180px] items-center justify-end gap-3">
+          {/* Volume Control - Right Section */}
+          <div className="flex w-1/3 items-center justify-end gap-4">
             <button
               onClick={() => setShowSearch(true)}
-              className={`rounded-full p-2 text-white/80 ${
-                isLoading ? 'opacity-50' : ''
-              }`}
-              disabled={isLoading}
+              className="rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white"
             >
               <SearchIcon className="h-5 w-5" />
             </button>
-
             <div className="group flex items-center gap-2">
-              <VolumeIcon className="h-5 w-5 text-white/80" />
+              <VolumeIcon className="h-5 w-5 text-zinc-400" />
               <div 
-                className="h-1 w-24 cursor-pointer rounded-full bg-white/10"
+                className="h-1 w-24 cursor-pointer rounded-full bg-zinc-800"
                 onClick={handleVolumeChange}
               >
                 <div 
@@ -447,9 +417,86 @@ export function MusicPlayer() {
           </div>
         </div>
       </div>
+
+      {/* Error Toast */}
+      {error && (
+        <ErrorToast 
+          message={error} 
+          onDismiss={() => setError(null)} 
+        />
+      )}
+
+      {/* Search Overlay - Moved outside */}
+      {showSearch && (
+        <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm">
+          <div className="h-full max-w-2xl mx-auto p-4 flex flex-col">
+            {/* Search Header */}
+            <div className="flex items-center gap-4 bg-zinc-900/90 p-4 rounded-t-lg border-b border-zinc-800">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search for songs..."
+                  className="w-full bg-zinc-800 text-white px-4 py-3 pr-10 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  autoFocus
+                />
+              </div>
+              <button
+                onClick={() => {
+                  setShowSearch(false);
+                  setSearchQuery('');
+                  setSearchResults([]);
+                }}
+                className="p-2 text-zinc-400 hover:text-white"
+              >
+                <CloseIcon className="h-6 w-6" />
+              </button>
+            </div>
+
+            {/* Search Results */}
+            <div className="flex-1 overflow-y-auto bg-zinc-900/90 rounded-b-lg">
+              {searchResults.length > 0 && (
+                <div className="p-4 space-y-2">
+                  {searchResults.map((track) => (
+                    <button
+                      key={track.id}
+                      onClick={() => {
+                        playMutation.mutate({ uri: track.uri });
+                        setSearchQuery('');
+                        setSearchResults([]);
+                      }}
+                      className="flex items-center gap-3 w-full p-2 hover:bg-zinc-800 rounded-lg group"
+                    >
+                      {track.album?.images[0] && (
+                        <img
+                          src={track.album.images[0].url}
+                          alt={track.name}
+                          className="h-10 w-10 rounded"
+                        />
+                      )}
+                      <div className="flex-1 text-left min-w-0">
+                        <div className="font-medium text-white truncate">
+                          {track.name}
+                        </div>
+                        <div className="text-sm text-zinc-400 truncate">
+                          {track.artists.map(a => a.name).join(', ')}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
+
+// Export the height constant for use in other components
+export const MUSIC_PLAYER_HEIGHT = PLAYER_HEIGHT;
 
 function PlayIcon({ className }: { className?: string }) {
   return (
@@ -538,7 +585,7 @@ function CloseIcon({ className }: { className?: string }) {
     >
       <path
         fillRule="evenodd"
-        d="M5.47 5.47a.75.75 0 011.06 0L12 10.94l5.47-5.47a.75.75 0 111.06 1.06L13.06 12l5.47 5.47a.75.75 0 11-1.06 1.06L12 13.06l-5.47 5.47a.75.75 0 01-1.06-1.06L10.94 12 5.47 6.53a.75.75 0 010-1.06z"
+        d="M5.47 5.47a.75.75 0 011.06 0L12 10.94l5.47-5.47a.75.75 0 111.06 1.06L13.06 12l5.47 5.47a.75.75 0 11-1.06 1.06L12 13.06l-5.47 5.47a.75.75 0 01-1.06-1.06z"
         clipRule="evenodd"
       />
     </svg>
@@ -581,6 +628,23 @@ function ExpandIcon({ className }: { className?: string }) {
       className={className}
     >
       <path fillRule="evenodd" d="M15 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V5.56l-3.97 3.97a.75.75 0 11-1.06-1.06l3.97-3.97h-2.69a.75.75 0 01-.75-.75zm-12 0A.75.75 0 013.75 3h4.5a.75.75 0 010 1.5H5.56l3.97 3.97a.75.75 0 01-1.06 1.06L4.5 5.56v2.69a.75.75 0 01-1.5 0v-4.5zm11.47 11.78a.75.75 0 111.06-1.06l3.97 3.97v-2.69a.75.75 0 011.5 0v4.5a.75.75 0 01-.75.75h-4.5a.75.75 0 010-1.5h2.69l-3.97-3.97zm-4.94-1.06a.75.75 0 010 1.06L5.56 19.5h2.69a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75v-4.5a.75.75 0 011.5 0v2.69l3.97-3.97a.75.75 0 011.06 0z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+function ShuffleIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" className={className}>
+      <path d="M13.151.922a.75.75 0 1 0-1.06 1.06L13.109 3H11.16a3.75 3.75 0 0 0-2.873 1.34l-6.173 7.356A2.25 2.25 0 0 1 .39 12.5H0V14h.391a3.75 3.75 0 0 0 2.873-1.34l6.173-7.356a2.25 2.25 0 0 1 1.724-.804h1.947l-1.017 1.018a.75.75 0 0 0 1.06 1.06L15.98 3.75 13.15.922zM.391 3.5H0V2h.391c1.109 0 2.16.49 2.873 1.34L4.89 5.277l-.979 1.167-1.796-2.14A2.25 2.25 0 0 0 .39 3.5z"/>
+      <path d="m7.5 10.723.98-1.167.957 1.14a2.25 2.25 0 0 0 1.724.804h1.947l-1.017-1.018a.75.75 0 1 1 1.06-1.06l2.829 2.828-2.829 2.828a.75.75 0 1 1-1.06-1.06L13.109 13H11.16a3.75 3.75 0 0 1-2.873-1.34l-.787-.938z"/>
+    </svg>
+  );
+}
+
+function RepeatIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" className={className}>
+      <path d="M0 4.75A3.75 3.75 0 0 1 3.75 1h8.5A3.75 3.75 0 0 1 16 4.75v5a3.75 3.75 0 0 1-3.75 3.75H9.81l1.018 1.018a.75.75 0 1 1-1.06 1.06L6.939 12.75l2.829-2.828a.75.75 0 1 1 1.06 1.06L9.811 12h2.439a2.25 2.25 0 0 0 2.25-2.25v-5a2.25 2.25 0 0 0-2.25-2.25h-8.5A2.25 2.25 0 0 0 1.5 4.75v5A2.25 2.25 0 0 0 3.75 12H5v1.5H3.75A3.75 3.75 0 0 1 0 9.75v-5z"/>
     </svg>
   );
 } 
