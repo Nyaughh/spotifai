@@ -43,12 +43,12 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
         // Update the session in the database
         await db.session.update({
           where: { 
-            sessionToken: (session as any).sessionToken // Use sessionToken instead of userId
+            sessionToken: (session as any).sessionToken
           },
           data: {
-            accessToken,
+            accessToken: accessToken as string,
             expiresAt: new Date(expiresAt),
-          },
+          } as any,
         });
       } catch (error) {
         console.error('Failed to refresh token:', error);
