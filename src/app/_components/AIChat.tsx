@@ -5,13 +5,20 @@ import { api } from "~/trpc/react";
 import AIInput_01 from '~/components/kokonutui/ai-input-01';
 import { Popover, PopoverTrigger, PopoverContent } from '~/components/ui/popover';
 import { History, Plus } from 'lucide-react';
+import { usePlaylistStore } from "~/store/playlistStore";
 
 type Message = {
   role: 'user' | 'assistant';
   content: string;
   functionCall?: {
     name: string;
-    args: Record<string, string>;
+    args: {
+      uri?: string;
+      position_ms?: number;
+      volume_percent?: number;
+      state?: boolean | 'off' | 'track' | 'context';
+      name?: string;
+    };
     result: boolean;
   };
 };
@@ -23,17 +30,60 @@ interface ChatHistory {
   createdAt: string;
 }
 
+type SpotifyFunction = {
+  name: string;
+  args: {
+    uri?: string;
+    position_ms?: number;
+    volume_percent?: number;
+    state?: boolean | 'off' | 'track' | 'context';
+    name?: string;
+  };
+};
+
 export default function AIChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const utils = api.useUtils();
+
+  // Add all Spotify mutations
+  const playMutation = api.spotify.play.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+  const pauseMutation = api.spotify.pause.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+  const nextMutation = api.spotify.next.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+  const previousMutation = api.spotify.previous.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+  const seekMutation = api.spotify.seek.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+  const volumeMutation = api.spotify.setVolume.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+  const shuffleMutation = api.spotify.shuffle.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+  const repeatMutation = api.spotify.repeat.useMutation({
+    onSuccess: () => utils.spotify.getPlayerState.invalidate(),
+  });
+  const addToQueueMutation = api.spotify.addToQueue.useMutation({
+    onSuccess: () => utils.spotify.getQueue.invalidate(),
+  });
+  const createPlaylistMutation = api.spotify.createPlaylist.useMutation({
+    onSuccess: () => utils.spotify.getPlaylists.invalidate(),
+  });
 
   const recommendations = [
-    "Suggest songs similar to 'Bohemian Rhapsody'",
-    "Create a workout playlist",
-    "Find sad songs for a rainy day",
-    "Recommend some indie rock bands",
+    "What kind of music do you recommend for studying?",
+    "Play something upbeat to boost my mood",
+    "Find me some relaxing songs for bedtime"
   ];
 
   const generateChatTitle = (firstMessage: string) => {
@@ -42,12 +92,88 @@ export default function AIChat() {
       : firstMessage;
   };
 
+  const handleSpotifyFunction = async (functionCall: SpotifyFunction) => {
+    try {
+      switch (functionCall.name) {
+        case 'play':
+          if (functionCall.args.uri) {
+            await playMutation.mutateAsync({ uri: functionCall.args.uri });
+          } else {
+            await playMutation.mutateAsync({});
+          }
+          return true;
+        case 'pause':
+          await pauseMutation.mutateAsync();
+          return true;
+        case 'next':
+          await nextMutation.mutateAsync();
+          return true;
+        case 'previous':
+          await previousMutation.mutateAsync();
+          return true;
+        case 'seek':
+          if (typeof functionCall.args.position_ms === 'number') {
+            await seekMutation.mutateAsync({ position_ms: functionCall.args.position_ms });
+          }
+          return true;
+        case 'setVolume':
+          if (typeof functionCall.args.volume_percent === 'number') {
+            await volumeMutation.mutateAsync({ volume_percent: functionCall.args.volume_percent });
+          }
+          return true;
+        case 'shuffle':
+          if (typeof functionCall.args.state === 'boolean') {
+            await shuffleMutation.mutateAsync({ state: functionCall.args.state });
+          }
+          return true;
+        case 'repeat':
+          if (functionCall.args.state === 'off' || functionCall.args.state === 'track' || functionCall.args.state === 'context') {
+            await repeatMutation.mutateAsync({ state: functionCall.args.state });
+          }
+          return true;
+        case 'addToQueue':
+          if (functionCall.args.uri) {
+            await addToQueueMutation.mutateAsync({ uri: functionCall.args.uri });
+          }
+          return true;
+        case 'createPlaylist':
+          if (functionCall.args.name) {
+            console.log('Skipping client-side playlist creation as it is handled on server'); // Debug log
+            return { success: true }; // Just return success without creating a playlist
+          }
+          return false;
+        default:
+          console.error('Unknown function:', functionCall.name);
+          return false;
+      }
+    } catch (error) {
+      console.error('Error executing function:', error);
+      return false;
+    }
+  };
+
   const chatMutation = api.ai.chat.useMutation({
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
+      let functionResults = [];
+      
+      if (data.functionCalls && data.functionCalls.length > 0) {
+        // Handle all function calls sequentially
+        for (const functionCall of data.functionCalls) {
+          const result = await handleSpotifyFunction(functionCall);
+          functionResults.push({
+            ...functionCall,
+            result: typeof result === 'object' ? result.success : !!result
+          });
+        }
+      }
+      
+      // Force refresh playlists
+      await utils.spotify.getPlaylists.invalidate();
+      
       const newMessage: Message = {
         role: 'assistant',
         content: data.response,
-        functionCall: data.functionCall
+        functionCall: functionResults[0]
       };
       
       const updatedMessages = [...messages, newMessage];
@@ -67,7 +193,6 @@ export default function AIChat() {
         setCurrentChatId(newChatId);
         localStorage.setItem('chatHistory', JSON.stringify(updatedHistory));
       } else if (currentChatId) {
-        // Update existing chat
         const updatedHistory = chatHistory.map(chat => 
           chat.id === currentChatId 
             ? { ...chat, messages: updatedMessages }
@@ -94,10 +219,22 @@ export default function AIChat() {
     if (savedHistory) {
       setChatHistory(JSON.parse(savedHistory));
     }
+
+    // Add event listener for messages from welcome screen
+    const handleWelcomeMessage = (event: CustomEvent<string>) => {
+      const message = event.detail;
+      handleSendMessage(message);
+    };
+
+    window.addEventListener('sendAIMessage', handleWelcomeMessage as EventListener);
+
+    return () => {
+      window.removeEventListener('sendAIMessage', handleWelcomeMessage as EventListener);
+    };
   }, []);
 
   const handleSendMessage = async (message: string) => {
-    if (!message.trim()) return;
+    if (!message.trim() || isLoading) return;
 
     const newMessage: Message = { role: 'user', content: message };
     const updatedMessages = [...messages, newMessage];
@@ -195,7 +332,7 @@ export default function AIChat() {
                   message.role === 'user'
                     ? 'bg-zinc-700 text-white'
                     : message.content.startsWith('✓')
-                    ? 'bg-green-500/20 text-green-200'
+                    ? 'bg-zinc-700/50 text-zinc-200'
                     : message.content.startsWith('❌')
                     ? 'bg-red-500/20 text-red-200'
                     : 'bg-zinc-800 text-white'

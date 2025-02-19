@@ -8,6 +8,7 @@ import { api } from "~/trpc/react";
 import { ErrorToast } from "~/components/ui/error-toast";
 import { MusicIcon, PlusIcon } from "lucide-react";
 import { usePlaylistStore } from "~/store/playlistStore";
+import { ScrollArea } from "~/components/ui/scroll-area";
 
 interface Playlist {
   id: string;
@@ -85,7 +86,7 @@ export function Playlists() {
     <>
       <div className="h-full">
         {/* Playlists List */}
-        <div className="w-full overflow-y-auto p-4">
+        <div className="w-full p-4">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-white">Your Playlists</h2>
             <button
@@ -96,35 +97,37 @@ export function Playlists() {
             </button>
           </div>
 
-          <div className="space-y-1 px-2">
-            {playlists?.items.map((playlist: Playlist) => (
-              <button
-                key={playlist.id}
-                onClick={() => handlePlaylistClick(playlist)}
-                className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-zinc-800/50"
-              >
-                {playlist?.images?.[0] ? (
-                  <img
-                    src={playlist.images[0].url}
-                    alt={playlist.name}
-                    className="h-12 w-12 rounded object-cover"
-                  />
-                ) : (
-                  <div className="flex h-12 w-12 items-center justify-center rounded bg-zinc-800">
-                    <MusicIcon className="h-6 w-6 text-zinc-400" />
+          <ScrollArea className="h-[calc(100vh-200px)]">
+            <div className="space-y-1 px-2">
+              {playlists?.items.map((playlist: Playlist) => (
+                <button
+                  key={playlist.id}
+                  onClick={() => handlePlaylistClick(playlist)}
+                  className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-zinc-800/50"
+                >
+                  {playlist?.images?.[0] ? (
+                    <img
+                      src={playlist.images[0].url}
+                      alt={playlist.name}
+                      className="h-12 w-12 rounded object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-12 w-12 items-center justify-center rounded bg-zinc-800">
+                      <MusicIcon className="h-6 w-6 text-zinc-400" />
+                    </div>
+                  )}
+                  <div>
+                    <div className="font-medium text-white">
+                      {playlist.name}
+                    </div>
+                    <div className="text-sm text-zinc-400">
+                      {playlist.owner.display_name}
+                    </div>
                   </div>
-                )}
-                <div>
-                  <div className="font-medium text-white">
-                    {playlist.name}
-                  </div>
-                  <div className="text-sm text-zinc-400">
-                    {playlist.owner.display_name}
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
+                </button>
+              ))}
+            </div>
+          </ScrollArea>
         </div>
 
         {/* Create Playlist Dialog */}
@@ -138,13 +141,13 @@ export function Playlists() {
                   value={newPlaylistName}
                   onChange={(e) => setNewPlaylistName(e.target.value)}
                   placeholder="Playlist name"
-                  className="w-full rounded-lg bg-zinc-800 px-4 py-2 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="w-full rounded-lg bg-zinc-800 px-4 py-2 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-600"
                 />
                 <div className="flex gap-2">
                   <button
                     type="submit"
                     disabled={createPlaylistMutation.isPending}
-                    className="rounded-lg bg-green-500 px-4 py-2 font-medium text-white hover:bg-green-600 disabled:opacity-50"
+                    className="rounded-lg bg-zinc-700 px-4 py-2 font-medium text-white hover:bg-zinc-600 disabled:opacity-50"
                   >
                     Create
                   </button>

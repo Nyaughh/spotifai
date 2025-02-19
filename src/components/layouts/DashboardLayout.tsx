@@ -16,6 +16,7 @@ import { MUSIC_PLAYER_HEIGHT } from "~/app/_components/MusicPlayer";
 import { useRouter } from 'next/navigation';
 import { usePlaylistStore } from "~/store/playlistStore";
 import Text01 from "~/components/kokonutui/text-01";
+import { ScrollArea } from "~/components/ui/scroll-area";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -99,15 +100,17 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
 
           {/* User Playlists */}
-          <div className="flex-1 overflow-y-auto border-t border-zinc-800 py-4">
-            <Playlists />
+          <div className="flex-1 border-t border-zinc-800 py-4">
+            <ScrollArea className="h-full">
+              <Playlists />
+            </ScrollArea>
           </div>
         </div>
 
         {/* Main Content */}
-        <div className="flex flex-1 flex-col overflow-y-auto">
+        <ScrollArea className="flex flex-1 flex-col">
           {children}
-        </div>
+        </ScrollArea>
 
         {/* Right Sidebar - AI Chat */}
         <div
@@ -130,10 +133,11 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
           {isRightSidebarOpen && (
             <>
-
               {/* Chat Content */}
               <div className="flex-1 overflow-hidden p-4">
-                <AIChat />
+                <ScrollArea className="h-full">
+                  <AIChat />
+                </ScrollArea>
               </div>
             </>
           )}

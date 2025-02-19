@@ -507,4 +507,113 @@ export const spotifyRouter = createTRPCRouter({
       });
     }
   }),
+
+  addToQueue: protectedProcedure
+    .input(z.object({ uri: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.session?.accessToken) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "Not authenticated with Spotify",
+        });
+      }
+
+      try {
+        const response = await fetch(
+          `https://api.spotify.com/v1/me/player/queue?uri=${input.uri}`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${ctx.session.accessToken}`,
+            },
+          }
+        );
+
+        if (!response.ok) {
+          await handleSpotifyError(response);
+        }
+
+        return { success: true };
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "An unexpected error occurred",
+        });
+      }
+    }),
+
+  getQueue: protectedProcedure.query(async ({ ctx }) => {
+    if (!ctx.session?.accessToken) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "Not authenticated with Spotify",
+      });
+    }
+
+    try {
+      const response = await fetch(
+        "https://api.spotify.com/v1/me/player/queue",
+        {
+          headers: {
+            Authorization: `Bearer ${ctx.session.accessToken}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        await handleSpotifyError(response);
+      }
+
+      return response.json();
+    } catch (error) {
+      if (error instanceof TRPCError) throw error;
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "An unexpected error occurred",
+      });
+    }
+  }),
+
+  addTracksToPlaylist: protectedProcedure
+    .input(z.object({ 
+      playlistId: z.string(),
+      uris: z.array(z.string())
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.session?.accessToken) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "Not authenticated with Spotify",
+        });
+      }
+
+      try {
+        const response = await fetch(
+          `https://api.spotify.com/v1/playlists/${input.playlistId}/tracks`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${ctx.session.accessToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              uris: input.uris,
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          await handleSpotifyError(response);
+        }
+
+        return { success: true };
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "An unexpected error occurred",
+        });
+      }
+    }),
 }); 

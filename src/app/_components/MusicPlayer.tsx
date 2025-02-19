@@ -7,6 +7,9 @@ import { api } from "~/trpc/react";
 import { ErrorToast } from "~/components/ui/error-toast";
 import { usePlaylistStore } from "~/store/playlistStore";
 import { cn } from "~/lib/utils";
+import { ScrollArea } from "~/components/ui/scroll-area";
+import { ListMusic } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "~/components/ui/popover";
 
 interface Track {
   id: string;
@@ -57,6 +60,7 @@ export function MusicPlayer() {
   const progressInterval = useRef<NodeJS.Timeout>();
   const [error, setError] = useState<string | null>(null);
   const utils = api.useUtils();
+  const [showQueue, setShowQueue] = useState(false);
 
   const formatTime = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
@@ -283,6 +287,26 @@ export function MusicPlayer() {
     setSearchQuery('');
   };
 
+  // Add queue-related queries and mutations
+  const { data: queueData } = api.spotify.getQueue.useQuery(undefined, {
+    refetchInterval: 5000,
+  });
+
+  const addToQueueMutation = api.spotify.addToQueue.useMutation({
+    onSuccess: () => {
+      utils.spotify.getQueue.invalidate();
+    },
+  });
+
+  const handleAddToQueue = async (uri: string) => {
+    try {
+      await addToQueueMutation.mutateAsync({ uri });
+    } catch (error) {
+      console.error('Error adding to queue:', error);
+      setError('Failed to add track to queue');
+    }
+  };
+
   if (status !== 'authenticated') return null;
 
   return (
@@ -327,7 +351,7 @@ export function MusicPlayer() {
                 className={cn(
                   "rounded-full p-2 transition-colors",
                   playerState.shuffle_state 
-                    ? "text-green-500 hover:text-green-400" 
+                    ? "text-zinc-200 hover:text-white" 
                     : "text-zinc-400 hover:text-white"
                 )}
                 disabled={isLoading}
@@ -367,7 +391,7 @@ export function MusicPlayer() {
                 className={cn(
                   "rounded-full p-2 transition-colors",
                   playerState.repeat_state !== 'off'
-                    ? "text-green-500 hover:text-green-400" 
+                    ? "text-zinc-200 hover:text-white" 
                     : "text-zinc-400 hover:text-white"
                 )}
                 disabled={isLoading}
@@ -384,7 +408,7 @@ export function MusicPlayer() {
                 onClick={handleSeek}
               >
                 <div
-                  className="absolute h-full rounded-full bg-white group-hover:bg-green-500"
+                  className="absolute h-full rounded-full bg-white group-hover:bg-zinc-200"
                   style={{
                     width: `${(playerState.progress_ms / playerState.duration_ms) * 100}%`,
                   }}
@@ -396,12 +420,95 @@ export function MusicPlayer() {
 
           {/* Volume Control - Right Section */}
           <div className="flex w-1/3 items-center justify-end gap-4">
-            <button
-              onClick={() => setShowSearch(true)}
-              className="rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white"
-            >
-              <SearchIcon className="h-5 w-5" />
-            </button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  className="rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                >
+                  <ListMusic className="h-5 w-5" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-0 bg-zinc-900 border-zinc-800">
+                <div className="p-2 border-b border-zinc-800">
+                  <h3 className="font-medium text-sm text-white">Queue</h3>
+                </div>
+                <ScrollArea className="h-[400px]">
+                  <div className="p-4 space-y-4">
+                    {queueData?.currently_playing && (
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-medium text-zinc-400">Now Playing</h4>
+                        <div className="flex items-center gap-3">
+                          <div className="relative h-10 w-10">
+                            <img
+                              src={queueData.currently_playing.album.images[0]?.url}
+                              alt={queueData.currently_playing.name}
+                              className="h-full w-full rounded object-cover"
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity rounded">
+                              <button
+                                onClick={() => playMutation.mutate({ uri: queueData.currently_playing.uri })}
+                                className="text-white hover:scale-110 transition-transform"
+                              >
+                                <PlayIcon className="h-5 w-5" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm text-white truncate">
+                              {queueData.currently_playing.name}
+                            </div>
+                            <div className="text-xs text-zinc-400 truncate">
+                              {queueData.currently_playing.artists.map((a: any) => a.name).join(', ')}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {queueData?.queue && queueData.queue.length > 0 && (
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-medium text-zinc-400">Next Up</h4>
+                        <div className="space-y-2">
+                          {queueData.queue.map((track: any) => (
+                            <div key={track.uri} className="flex items-center gap-3 group">
+                              <div className="relative h-10 w-10">
+                                <img
+                                  src={track.album.images[0]?.url}
+                                  alt={track.name}
+                                  className="h-full w-full rounded object-cover"
+                                />
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity rounded">
+                                  <button
+                                    onClick={() => playMutation.mutate({ uri: track.uri })}
+                                    className="text-white hover:scale-110 transition-transform"
+                                  >
+                                    <PlayIcon className="h-5 w-5" />
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm text-white truncate">
+                                  {track.name}
+                                </div>
+                                <div className="text-xs text-zinc-400 truncate">
+                                  {track.artists.map((a: any) => a.name).join(', ')}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {(!queueData?.queue || queueData.queue.length === 0) && (
+                      <div className="text-center text-sm text-zinc-400 py-4">
+                        Queue is empty
+                      </div>
+                    )}
+                  </div>
+                </ScrollArea>
+              </PopoverContent>
+            </Popover>
             <div className="group flex items-center gap-2">
               <VolumeIcon className="h-5 w-5 text-zinc-400" />
               <div 
@@ -409,7 +516,7 @@ export function MusicPlayer() {
                 onClick={handleVolumeChange}
               >
                 <div 
-                  className="h-full rounded-full bg-white group-hover:bg-green-500"
+                  className="h-full rounded-full bg-white group-hover:bg-zinc-200"
                   style={{ width: `${playerState.volume_percent}%` }}
                 />
               </div>
@@ -438,7 +545,7 @@ export function MusicPlayer() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search for songs..."
-                  className="w-full bg-zinc-800 text-white px-4 py-3 pr-10 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="w-full bg-zinc-800 text-white px-4 py-3 pr-10 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-600"
                   autoFocus
                 />
               </div>
