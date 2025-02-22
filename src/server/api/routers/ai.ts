@@ -17,7 +17,7 @@ Available functions:
 - skipToNext() - Skip to the next track
 - skipToPrevious() - Skip to the previous track
 - searchTracksAndPlay({ query: string }) - Search for tracks and play the first result
-- createPlaylist({ name: string, query: string, limit?: number }) - Create a new playlist and automatically fill it with songs
+- createPlaylist({ name: string, queries: Array<{query: string, limit: number}> }) - Create a new playlist and automatically fill it with songs from multiple searches
 
 IMPORTANT INSTRUCTIONS:
 1. Keep responses concise and engaging
@@ -27,23 +27,22 @@ IMPORTANT INSTRUCTIONS:
    - Include exactly ONE function call in JSON format
    - Format must be: "Your response" followed by JSON
 4. For playlist creation:
-   - Use a SINGLE createPlaylist call with both the name and query
-   - The query should describe what kind of songs to add, only add what the user asks for and nothing else
-   - Optionally specify limit (default is 10)
-   - Format example for creating a Beatles playlist:
-     I'll create a Beatles playlist for you!
-     {"function":"createPlaylist","args":{"name":"Beatles Hits","query":"The Beatles greatest hits popular songs","limit":10}}
+   - Use a SINGLE createPlaylist call with name and queries array
+   - Each query object should have a query string and limit number
+   - Format example for creating a mixed playlist:
+     Creating 90s playlist!
+     {"function":"createPlaylist","args":{"name":"90s Mix","queries":[{"query":"rock 90s","limit":5},{"query":"hiphop 90s","limit":5}]}}
 5. For unclear commands, ask for clarification
 6. If user asks for a song, search for it and play it
 
 Example responses:
 For playing a song:
-"Playing Shape of You by Ed Sheeran"
+"Playing Shape of You"
 {"function":"searchTracksAndPlay","args":{"query":"Shape of You Ed Sheeran"}}
 
 For creating a playlist:
-"Creating a rock workout playlist for you!"
-{"function":"createPlaylist","args":{"name":"Rock Workout","query":"best high energy rock songs for workout gym motivation","limit":15}}`;
+"Creating Taylor Swift and Anime playlist"
+{"function":"createPlaylist","args":{"name":"Taylor Swift x Anime","queries":[{"query":"taylor swift","limit":5},{"query":"anime opening","limit":5}]}}`;
 
 interface FunctionCall {
   function: string;
@@ -94,7 +93,20 @@ export const aiRouter = createTRPCRouter({
         try {
           console.log('Found function matches:', functionMatches); // Debug log
           const results: FunctionResult[] = [];
-          const functionCalls = functionMatches.map(match => JSON.parse(match) as FunctionCall);
+          const functionCalls = functionMatches.map(match => {
+            const parsed = JSON.parse(match);
+            // Handle case where function property is missing but name exists
+            if (!parsed.function && parsed.name) {
+              return {
+                function: "createPlaylist",
+                args: {
+                  name: parsed.name,
+                  queries: parsed.queries
+                }
+              } as FunctionCall;
+            }
+            return parsed as FunctionCall;
+          });
           console.log('Parsed function calls:', functionCalls); // Debug log
           const caller = createCaller(ctx);
 
@@ -147,20 +159,30 @@ export const aiRouter = createTRPCRouter({
                 });
                 console.log('Created playlist:', playlist); // Debug log
                 
-                if (playlist && functionCall.args.query) {
-                  // Search for tracks
-                  const tracks = await caller.spotify.searchTracks({
-                    query: functionCall.args.query
-                  });
-                  console.log('Found tracks:', tracks.tracks?.items.length); // Debug log
+                if (playlist && functionCall.args.queries) {
+                  const allTrackUris: string[] = [];
                   
-                  // Add tracks to the playlist
-                  const selectedTracks = tracks.tracks?.items.slice(0, functionCall.args.limit || 10);
-                  if (selectedTracks?.length > 0) {
-                    const trackUris = selectedTracks.map((track: SpotifyTrack) => track.uri);
+                  // Process each query
+                  for (const queryObj of functionCall.args.queries) {
+                    // Search for tracks
+                    const tracks = await caller.spotify.searchTracks({
+                      query: queryObj.query
+                    });
+                    console.log(`Found tracks for "${queryObj.query}":`, tracks.tracks?.items.length); // Debug log
+                    
+                    // Get specified number of tracks from this query
+                    const selectedTracks = tracks.tracks?.items.slice(0, queryObj.limit);
+                    if (selectedTracks?.length > 0) {
+                      const trackUris = selectedTracks.map((track: SpotifyTrack) => track.uri);
+                      allTrackUris.push(...trackUris);
+                    }
+                  }
+                  
+                  // Add all collected tracks to the playlist
+                  if (allTrackUris.length > 0) {
                     await caller.spotify.addTracksToPlaylist({
                       playlistId: playlist.id,
-                      uris: trackUris
+                      uris: allTrackUris
                     });
                     success = true;
                     console.log('Successfully added tracks to playlist:', playlist.id); // Debug log

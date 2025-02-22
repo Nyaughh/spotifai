@@ -257,7 +257,8 @@ export default function AIChat() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between border-b border-zinc-800 p-4">
+      {/* Fixed Header */}
+      <div className="flex-none flex items-center justify-between border-b border-zinc-800 p-4">
         <h2 className="text-sm font-medium text-white">AI Assistant</h2>
         <div className="flex items-center gap-2">
           <Popover>
@@ -305,24 +306,25 @@ export default function AIChat() {
         </div>
       </div>
 
-      {messages.length === 0 ? (
-        <div className="flex-1 p-4 space-y-4">
-          <h3 className="text-sm font-medium text-zinc-400">Suggested prompts</h3>
-          <div className="space-y-2">
-            {recommendations.map((rec) => (
-              <button
-                key={rec}
-                onClick={() => handleSendMessage(rec)}
-                className="w-full p-3 text-left text-sm rounded-lg bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 transition-colors"
-              >
-                {rec}
-              </button>
-            ))}
+      {/* Scrollable Messages Area */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.length === 0 ? (
+          <div className="space-y-4">
+            <h3 className="text-sm font-medium text-zinc-400">Suggested prompts</h3>
+            <div className="space-y-2">
+              {recommendations.map((rec) => (
+                <button
+                  key={rec}
+                  onClick={() => handleSendMessage(rec)}
+                  className="w-full p-3 text-left text-sm rounded-lg bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 transition-colors"
+                >
+                  {rec}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.map((message, index) => (
+        ) : (
+          messages.map((message, index) => (
             <div
               key={index}
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -341,18 +343,19 @@ export default function AIChat() {
                 {message.content}
               </div>
             </div>
-          ))}
-          {isLoading && (
-            <div className="flex justify-start">
-              <div className="rounded-lg bg-zinc-800 p-3 text-zinc-400">
-                Thinking...
-              </div>
+          ))
+        )}
+        {isLoading && (
+          <div className="flex justify-start">
+            <div className="rounded-lg bg-zinc-800 p-3 text-zinc-400">
+              Thinking...
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
-      <div className="border-t border-zinc-700/50 p-4">
+      {/* Fixed Input Area */}
+      <div className="flex-none border-t border-zinc-700/50 p-4 bg-zinc-900">
         <AIInput_01 onSend={handleSendMessage} isLoading={isLoading} />
       </div>
     </div>

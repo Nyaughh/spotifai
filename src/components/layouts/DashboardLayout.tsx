@@ -135,9 +135,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             <>
               {/* Chat Content */}
               <div className="flex-1 overflow-hidden p-4">
-                <ScrollArea className="h-full">
                   <AIChat />
-                </ScrollArea>
               </div>
             </>
           )}
